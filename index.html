@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#090d0a">
+<meta name="description" content="Vypadla komunikace. Tvůj tým čeká na instrukce. Máš 180 sekund.">
+<meta property="og:title" content="Mise 180: Signál ztracen">
+<meta property="og:description" content="Vypadla komunikace. Tvůj tým čeká na instrukce. Máš 180 sekund.">
+<meta property="og:type" content="website">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Mise 180</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Saira+Stencil+One&display=swap">
+<style>
+/* Layout: one-screen field terminal. Status strip (mission clock, phase track, signal) on top, one task stage in the middle, radio log at the bottom. Deliberately single dark theme. */
+:root{
+  --bg:#090d0a;
+  --bg-glow:#101b12;
+  --panel:#0f1610;
+  --line:#1f2d21;
+  --edge:#2f4632;
+  --dim:#7a957d;
+  --fg:#dbe9d7;
+  --green:#8fe388;
+  --green-dk:#1b3a1f;
+  --amber:#f2b33d;
+  --red:#ff5a48;
+  --blue:#4ea9ff;
+  --grid:rgba(143,227,136,.045);
+  --scan:rgba(0,0,0,.22);
+  --veil:rgba(9,13,10,.88);
+  --shadow:rgba(0,0,0,.6);
+  --f-display:"Saira Stencil One","Impact","Arial Narrow",sans-serif;
+  --f-ui:"Barlow Condensed","Arial Narrow","Roboto Condensed",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:
+    linear-gradient(var(--grid) 1px,transparent 1px) 0 0/28px 28px,
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/28px 28px,
+    radial-gradient(120% 70% at 50% 0%,var(--bg-glow) 0%,var(--bg) 65%),
+    var(--bg);
+  color:var(--fg);font-family:var(--f-ui);font-size:17px;line-height:1.35;
+  overflow:hidden;-webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none;
+}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+button:focus-visible,[tabindex]:focus-visible,a:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+#noise{position:fixed;inset:0;width:100%;height:100%;image-rendering:pixelated;opacity:var(--noise,.045);pointer-events:none;mix-blend-mode:screen;z-index:0;transition:opacity .15s}
+#noise.hot{opacity:.2}
+.scan{position:fixed;inset:0;pointer-events:none;z-index:3;background:repeating-linear-gradient(0deg,var(--scan) 0 1px,transparent 1px 3px)}
+
+.app{position:relative;z-index:1;height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:10px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px 12px}
+.app.glitch{animation:jit .24s steps(3)}
+@keyframes jit{33%{transform:translate(3px,-1px)}66%{transform:translate(-2px,2px)}}
+
+/* HUD */
+.hud{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.callsign{font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps{display:flex;gap:4px;list-style:none;margin:7px 0 0;padding:0}
+.steps li{width:24px;height:6px;background:var(--line)}
+.steps li.done{background:var(--green)}
+.steps li.now{background:var(--amber);animation:blink 1s steps(2) infinite}
+.sig{display:flex;align-items:flex-end;gap:2px;height:22px}
+.sig i{width:4px;background:var(--line)}
+.sig i:nth-child(1){height:5px}.sig i:nth-child(2){height:9px}.sig i:nth-child(3){height:13px}.sig i:nth-child(4){height:17px}.sig i:nth-child(5){height:22px}
+.sig i.on{background:var(--green)}
+.sig.dead i:first-child{background:var(--red);animation:blink 1s steps(2) infinite}
+.clock{font-family:var(--f-mono);font-weight:600;font-size:40px;line-height:1;font-variant-numeric:tabular-nums;color:var(--green);display:flex;align-items:baseline;gap:2px}
+.clock small{font-size:12px;color:var(--dim);font-weight:400}
+.clock.warn{color:var(--amber)}
+.clock.crit{color:var(--red)}
+.clock.paused span{opacity:.55}
+.mute{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--edge);background:transparent;color:var(--dim);padding:0}
+.mute svg{width:18px;height:18px}
+.phasebar{height:3px;background:var(--line);flex:none}
+.phasebar i{display:block;height:100%;background:var(--green);transform-origin:left;transform:scaleX(0)}
+.phasebar.low i{background:var(--red)}
+
+.stage{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch}
+.log{flex:none;font-family:var(--f-mono);font-size:11.5px;color:var(--dim);border-top:1px solid var(--line);padding-top:8px;min-height:3.4em;display:flex;flex-direction:column;justify-content:flex-end;gap:2px}
+.log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log div:last-child{color:var(--fg)}
+.log .ts{color:var(--green)}
+
+/* shared */
+.eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:0}
+.btn{display:inline-flex;justify-content:center;align-items:center;gap:10px;min-height:52px;padding:0 22px;border:1px solid var(--green);background:transparent;color:var(--green);
+  font-family:var(--f-ui);font-weight:700;font-size:19px;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;flex:none}
+.btn.primary{background:var(--green);color:var(--bg)}
+.btn.big{min-height:62px;font-size:22px;width:100%}
+.btn.ghost{border-color:var(--edge);color:var(--dim)}
+.btn:disabled{opacity:.3;cursor:default}
+.btn.primary:not(:disabled):active{transform:translateY(1px)}
+.fine{font-family:var(--f-mono);font-size:11px;color:var(--dim);margin:0;line-height:1.5}
+.g{flex:1;display:flex;flex-direction:column;gap:14px;padding-block:6px}
+.g-head{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:12px;letter-spacing:.12em;color:var(--dim)}
+.g-head b{color:var(--fg);font-weight:600}
+.g-hint{text-align:center;color:var(--dim);margin:0;font-size:16px;text-wrap:balance}
+.g-mid{flex:1;display:flex;flex-direction:column;justify-content:center;gap:18px}
+@keyframes blink{50%{opacity:.25}}
+@keyframes rise{from{transform:translateY(10px)}}
+@keyframes grow{from{transform:scaleX(0)}}
+@keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+
+/* intro */
+.intro{flex:1;display:flex;flex-direction:column;justify-content:center;gap:18px;padding-block:8px}
+.intro > *{animation:rise .45s both}
+.intro > :nth-child(2){animation-delay:.12s}.intro > :nth-child(3){animation-delay:.3s}.intro > :nth-child(4){animation-delay:.6s}.intro > :nth-child(5){animation-delay:.9s}.intro > :nth-child(6){animation-delay:1.1s}.intro > :nth-child(7){animation-delay:1.2s}
+.intro-top{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:11px;color:var(--dim);letter-spacing:.12em}
+.rec{color:var(--red);animation:blink 1.2s steps(2) infinite}
+.lost{font-family:var(--f-display);font-weight:400;font-size:clamp(46px,14vw,76px);line-height:.9;margin:0;color:var(--fg);text-wrap:balance}
+.lost em{display:block;font-style:normal;color:var(--red);text-shadow:3px 0 0 var(--blue),-2px 0 0 var(--green);opacity:.95}
+.wave{width:100%;height:44px;display:block}
+.wave polyline{fill:none;stroke:var(--green);stroke-width:1.5;opacity:.8}
+.wave line{stroke:var(--line);stroke-dasharray:2 4}
+.lastmsg{border-left:2px solid var(--amber);padding:4px 0 4px 12px}
+.lastmsg .msg{font-size:23px;font-weight:600;margin:4px 0 0;line-height:1.2;text-wrap:balance}
+.have{font-size:21px;margin:0;line-height:1.25}
+.have b{color:var(--green)}
+
+/* briefing */
+.brief{flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;animation:rise .35s both}
+.brief .no{font-family:var(--f-display);font-size:96px;line-height:.8;color:transparent;-webkit-text-stroke:1.5px var(--green);margin:0}
+.brief h2{font-family:var(--f-ui);font-weight:700;font-size:36px;text-transform:uppercase;letter-spacing:.04em;margin:0;line-height:1;text-wrap:balance}
+.brief .sit{color:var(--dim);font-size:19px;margin:0;text-wrap:pretty}
+.brief .rule{font-size:21px;margin:0;padding:14px 16px;background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--green);text-wrap:pretty}
+.auto{height:3px;background:var(--line)}
+.auto i{display:block;height:100%;background:var(--dim);transform-origin:left;animation:fill 8s linear both}
+@keyframes fill{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+/* story beat */
+.done{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;animation:rise .3s both}
+.done .tick{width:54px;height:54px;color:var(--green)}
+.done h2{font-family:var(--f-display);font-weight:400;font-size:clamp(32px,10vw,48px);line-height:.95;margin:0;color:var(--green);text-transform:uppercase;text-wrap:balance}
+.done .sum{font-family:var(--f-mono);font-size:13px;margin:0;color:var(--fg)}
+
+/* 01 reflex */
+.orb-wrap{flex:1;display:grid;place-items:center;min-height:230px}
+.orb{--c:var(--edge);width:min(66vw,250px);max-width:100%;aspect-ratio:1;border-radius:50%;border:2px solid var(--c);background:var(--bg);color:var(--c);
+  box-shadow:inset 0 0 0 12px var(--bg),inset 0 0 70px var(--c),0 0 50px -18px var(--c);
+  font-family:var(--f-ui);font-weight:700;font-size:24px;letter-spacing:.14em;touch-action:none;transition:box-shadow .08s}
+.orb[data-s="wait"],.orb[data-s="bad"]{--c:var(--red)}
+.orb[data-s="wait"]{animation:pulse 1.2s ease-in-out infinite}
+.orb[data-s="bad"]{animation:shake .25s 2}
+.orb[data-s="go"]{--c:var(--green);background:var(--green);color:var(--bg);box-shadow:0 0 0 10px var(--green-dk),0 0 70px var(--green)}
+.orb[data-s="hit"]{--c:var(--green)}
+@keyframes pulse{50%{box-shadow:inset 0 0 0 12px var(--bg),inset 0 0 40px var(--c),0 0 30px -18px var(--c)}}
+.pips{display:flex;justify-content:center;gap:8px;list-style:none;padding:0;margin:0}
+.pips li{width:30px;height:6px;background:var(--line)}
+.pips li.ok{background:var(--green)}
+
+/* 02 memory */
+.mem{display:grid;grid-template-columns:18px 1fr;grid-template-rows:18px auto;gap:6px;width:min(100%,330px);margin:0 auto}
+.ax-x{grid-column:2;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.ax-y{grid-column:1;grid-row:2;display:grid;grid-template-rows:repeat(4,1fr);gap:6px}
+.ax-x span,.ax-y span{font-family:var(--f-mono);font-size:11px;color:var(--dim);display:grid;place-items:center}
+.mgrid{grid-column:2;grid-row:2;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);gap:6px;aspect-ratio:1;max-width:100%}
+.cell{position:relative;border:1px solid var(--edge);background:var(--panel);padding:0}
+.cell.lit{background:var(--green);border-color:var(--green);box-shadow:0 0 22px -4px var(--green)}
+.cell.sel{background:var(--green-dk);border-color:var(--green)}
+.cell.sel::after,.cell.hit::after{content:"";position:absolute;inset:30%;border:2px solid var(--green);border-radius:50%}
+.cell.hit{background:var(--green)}
+.cell.hit::after{border-color:var(--bg)}
+.cell.miss{background:var(--red);border-color:var(--red)}
+.cell.lost{border:2px dashed var(--green)}
+.mgrid.locked .cell{cursor:default}
+
+/* 03 decode */
+.rx{font-family:var(--f-mono);font-size:11px;color:var(--dim);letter-spacing:.08em;margin:0;overflow-wrap:anywhere}
+.seq{display:flex;justify-content:center;gap:6px}
+.tile{flex:1 1 0;max-width:46px;aspect-ratio:1;border:1px solid var(--edge);background:var(--panel);display:grid;place-items:center;color:var(--fg)}
+.tile svg{width:60%;height:60%}
+.tile.q{border-color:var(--amber);color:var(--amber);font-family:var(--f-mono);font-weight:600;font-size:20px;animation:blink 1s steps(2) infinite}
+.tile.q.ok{color:var(--green);border-color:var(--green);animation:none}
+.tile.q.fix{animation:none}
+.opts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.opt{aspect-ratio:1;max-width:100%;border:1px solid var(--green);background:transparent;color:var(--green);display:grid;place-items:center;padding:0}
+.opt svg{width:46%;height:46%}
+.opt.ok{background:var(--green);color:var(--bg)}
+.opt.bad{border-color:var(--red);color:var(--red);animation:shake .25s 2}
+.opts.locked .opt{cursor:default}
+
+/* 04 route */
+.map{display:block;width:100%;max-width:420px;height:auto;margin:0 auto;background:var(--panel);border:1px solid var(--edge)}
+.map .contour{fill:none;stroke:var(--line);stroke-width:1}
+.map .r-line{fill:none;stroke:var(--dim);stroke-width:4;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:7 6;transition:opacity .15s}
+.map .r-hit{fill:none;stroke:transparent;stroke-width:28;stroke-linejoin:round;pointer-events:stroke;cursor:pointer}
+.map.picking .route:not(.on) .r-line{opacity:.35}
+.map .route.on .r-line{stroke:var(--green);stroke-width:5;stroke-dasharray:none}
+.map .route.bad .r-line{stroke:var(--red)}
+.map .badge{pointer-events:none}
+.map .badge rect{fill:var(--bg);stroke:var(--edge)}
+.map .badge text{fill:var(--fg);font:600 12px var(--f-mono);text-anchor:middle;dominant-baseline:central}
+.map .obs{pointer-events:none}
+.map .obs polygon{fill:var(--amber)}
+.map .obs .ex{fill:var(--bg);font:700 11px var(--f-mono);text-anchor:middle}
+.map .obs .add{fill:var(--amber);font:700 13px var(--f-mono)}
+.map .wp{fill:var(--bg);stroke:var(--dim);stroke-width:2}
+.map .tag{cursor:pointer}
+.map .tag circle{fill:var(--bg);stroke:var(--fg);stroke-width:1.5}
+.map .tag text{fill:var(--fg);font:700 12px var(--f-mono);text-anchor:middle;dominant-baseline:central}
+.map .tag.on circle{fill:var(--green);stroke:var(--green)}
+.map .tag.on text{fill:var(--bg)}
+.map .base{fill:var(--green)}
+.map .goal{fill:none;stroke:var(--amber);stroke-width:2}
+.map .lbl{fill:var(--dim);font:11px var(--f-mono);letter-spacing:.1em}
+.map .unit{fill:var(--green)}
+.map .unit.bad{fill:var(--red)}
+.legend{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;font-family:var(--f-mono);font-size:11px;color:var(--dim)}
+.legend b{color:var(--amber);font-weight:600}
+.legend .tank{color:var(--fg)}
+.rt-row{display:flex;gap:8px}
+.chip{flex:1;min-height:46px;border:1px solid var(--edge);background:var(--panel);font-weight:700;font-size:18px;letter-spacing:.1em}
+.chip[aria-pressed="true"]{border-color:var(--green);color:var(--green);background:var(--green-dk)}
+
+/* 05 signal */
+.sig-area{position:relative;flex:1;min-height:250px;border:1px solid var(--edge);overflow:hidden;touch-action:none;
+  background:repeating-radial-gradient(circle at 50% 50%,transparent 0 46px,var(--line) 46px 47px),var(--panel)}
+.tok{position:absolute;width:60px;height:60px;left:calc(var(--x) * (100% - 60px));top:calc(var(--y) * (100% - 60px));border:0;padding:0;background:transparent;touch-action:none;animation:pop .14s both}
+.tok::before{content:"";position:absolute;inset:9px}
+.tok-blue::before{border-radius:50%;background:var(--blue);box-shadow:0 0 20px var(--blue)}
+.tok-red::before{inset:13px;background:var(--red);transform:rotate(45deg);box-shadow:0 0 20px var(--red)}
+.tok.got{animation:got .22s forwards}
+.tok.bad{animation:shake .2s 2}
+.tok.fade{opacity:0;transition:opacity .2s}
+@keyframes pop{from{transform:scale(.4);opacity:0}}
+@keyframes got{to{transform:scale(1.6);opacity:0}}
+.sig-banner{position:absolute;inset:0;z-index:2;display:grid;place-items:center;text-align:center;padding:16px;background:var(--veil);
+  font-family:var(--f-display);font-size:clamp(28px,8.5vw,40px);line-height:1.05;color:var(--red);animation:blink .3s steps(2) 4}
+.g-head b.fq-blue{color:var(--blue)}
+.g-head b.fq-red{color:var(--red)}
+.t-blue{color:var(--blue)}
+.t-red{color:var(--red)}
+
+/* 06 team */
+.needs{display:flex;flex-direction:column;gap:10px}
+.need{display:grid;grid-template-columns:40px 1fr;grid-template-rows:auto auto;gap:6px 12px;align-items:center;padding:10px 12px;border:1px solid var(--edge);background:var(--panel);cursor:pointer;transition:border-color .1s,background .1s}
+.need .ic{grid-row:1/3;width:40px;height:40px;color:var(--amber)}
+.need .nl{font-weight:600;font-size:19px;line-height:1.1}
+.need .slot{min-height:42px;border:1px dashed var(--edge);display:flex;align-items:center;padding:3px}
+.need .slot:empty::before{content:"sem vybavení";font-family:var(--f-mono);font-size:11px;color:var(--dim);padding-left:8px;letter-spacing:.08em}
+.need.over{border-color:var(--green);background:var(--green-dk)}
+.need.ok{border-color:var(--green)}
+.need.ok .ic{color:var(--green)}
+.need.bad{border-color:var(--red)}
+.need.bad .ic{color:var(--red)}
+.tray{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;min-height:58px;padding:8px;border:1px solid var(--line)}
+.item{display:inline-flex;align-items:center;min-height:40px;padding:0 14px;border:0;background:var(--green);color:var(--bg);font-weight:700;font-size:18px;letter-spacing:.03em;touch-action:none;cursor:grab}
+.item.picked{outline:2px solid var(--amber);outline-offset:2px}
+.item.lifting{opacity:.25}
+.item.ghost{position:fixed;left:0;top:0;z-index:60;pointer-events:none;box-shadow:0 12px 30px var(--shadow)}
+.q{font-family:var(--f-ui);font-weight:700;font-size:28px;line-height:1.05;margin:0;text-transform:uppercase;text-wrap:balance}
+.choices{display:flex;flex-direction:column;gap:10px}
+.choice{text-align:left;padding:14px 16px;border:1px solid var(--edge);background:var(--panel);font-size:19px;line-height:1.2;min-height:56px}
+.choice:hover{border-color:var(--green)}
+.choice.on{border-color:var(--green);background:var(--green-dk)}
+
+/* finale */
+.scan-fin{flex:1;display:flex;flex-direction:column;justify-content:center;gap:16px;animation:rise .3s both}
+.scan-fin h2{font-family:var(--f-display);font-weight:400;font-size:clamp(38px,12vw,60px);line-height:.9;margin:0;color:var(--green)}
+.srows{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-family:var(--f-mono);font-size:11px;color:var(--dim)}
+.srows .bar i{animation:grow .5s ease-out both}
+.bar{height:6px;background:var(--line)}
+.bar i{display:block;height:100%;background:var(--dim);transform-origin:left}
+.result{display:flex;flex-direction:column;gap:18px;padding-block:8px 18px;animation:rise .4s both}
+.arch{display:flex;align-items:center;gap:14px}
+.arch-ic{flex:none;width:64px;height:64px;display:grid;place-items:center;border:1.5px solid var(--green);color:var(--green)}
+.arch-ic svg{width:62%;height:62%}
+.arch h2{font-family:var(--f-display);font-weight:400;font-size:clamp(40px,12vw,62px);line-height:.88;margin:0;color:var(--green);text-transform:uppercase;min-width:0;overflow-wrap:anywhere}
+.arch-q{font-size:21px;line-height:1.3;margin:0;text-wrap:pretty}
+.profile{display:grid;grid-template-columns:auto 1fr auto;gap:8px 12px;align-items:center;font-size:16px}
+.profile .bar{height:8px}
+.profile .top .bar i{background:var(--green)}
+.profile .top span:first-child{color:var(--green);font-weight:700}
+.profile > div{display:contents}
+.pct{font-family:var(--f-mono);font-size:12px;font-variant-numeric:tabular-nums;color:var(--dim);text-align:right;min-width:3.2em}
+.stats{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;margin:0;font-size:15px;line-height:1.25;border-top:1px solid var(--line);padding-top:14px}
+.stats dt{font-family:var(--f-mono);font-size:11px;color:var(--dim);letter-spacing:.08em;padding-top:2px}
+.stats dd{margin:0;min-width:0}
+.cta{display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--green);background:var(--green-dk)}
+.cta-lead{font-family:var(--f-display);font-size:clamp(24px,7vw,30px);line-height:1;margin:0 0 4px;color:var(--fg)}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important}
+}
+@media (max-height:640px){
+  .clock{font-size:32px}
+  .brief .no{font-size:70px}
+  .orb-wrap{min-height:190px}
+  .orb{width:min(56vw,210px)}
+}
+</style>
+</head>
+<body>
+
+<canvas id="noise" aria-hidden="true"></canvas>
+<div class="scan" aria-hidden="true"></div>
+
+<div class="app" id="app">
+  <header class="hud">
+    <div style="min-width:0">
+      <div class="callsign">MISE 180 · CENTRÁLA</div>
+      <ol class="steps" id="steps" aria-label="Postup mise"><li></li><li></li><li></li><li></li><li></li><li></li></ol>
+    </div>
+    <div class="sig dead" id="sig" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="clock paused" id="clockbox" aria-label="Zbývající čas v sekundách"><span id="clock">180</span><small>S</small></div>
+    <button class="mute" id="mute" type="button" aria-label="Vypnout zvuk"></button>
+  </header>
+  <div class="phasebar" id="pbarbox"><i id="pbar"></i></div>
+  <main class="stage" id="stage"></main>
+  <footer class="log" id="log" aria-live="polite"></footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* Odkaz pro závěrečné tlačítko. */
+const CONFIG = { ctaUrl: 'https://doarmady.mo.gov.cz/', ctaLabel: 'Prozkoumej kariéru v armádě' };
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const fmt1 = n => n.toFixed(1).replace('.', ',');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const app = $('#app'), stage = $('#stage'), clockEl = $('#clock'), clockBox = $('#clockbox'),
+      pbar = $('#pbar'), pbarBox = $('#pbarbox'), logEl = $('#log'), stepsEl = $$('#steps li'),
+      sigEl = $('#sig'), muteBtn = $('#mute');
+
+const ICON = {
+  med: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="15" rx="1.5"/><path d="M9 5V3h6v2M12 9v7M8.5 12.5h7"/></svg>',
+  com: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 22V11"/><circle cx="12" cy="9" r="2"/><path d="M8 13a5.5 5.5 0 0 1 0-8M16 5a5.5 5.5 0 0 1 0 8M5 16a9.5 9.5 0 0 1 0-14M19 2a9.5 9.5 0 0 1 0 14"/></svg>',
+  veh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 17V8h11v9M13 11h4.5l3.5 3.5V17h-8"/><circle cx="6.5" cy="17.5" r="2" fill="var(--panel)"/><circle cx="17" cy="17.5" r="2" fill="var(--panel)"/></svg>',
+  A: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M13.5 2 4 14h7l-1 8 9.5-12h-7z"/></svg>',
+  N: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6.5 6.5M7 10h6M10 7v6"/></svg>',
+  S: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><path d="M7 19h7a3.5 3.5 0 0 0 0-7h-4a3.5 3.5 0 0 1 0-7h7"/><path d="m15 2.5 2.5 2.5L15 7.5"/></svg>',
+  T: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0M14 14.5a4.5 4.5 0 0 1 7.5 3.5"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"><path d="M3.5 12.5 9.5 18.5 20.5 6"/></svg>',
+  on: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" stroke-linecap="round"/></svg>',
+  off: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="m17 9 5 6M22 9l-5 6" stroke-linecap="round"/></svg>'
+};
+const SHAPE = {
+  tri: '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12,3 22.5,21 1.5,21"/></svg>',
+  dot: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>',
+  sq:  '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18"/></svg>',
+  dia: '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12,1 23,12 12,23 1,12"/></svg>'
+};
+const SHAPE_NAME = { tri: 'trojúhelník', dot: 'kruh', sq: 'čtverec', dia: 'kosočtverec' };
+
+/* ---------- zvuk: syntetizované rádiové efekty ---------- */
+const Sound = (() => {
+  let ctx = null, buf = null, muted = false;
+  try { muted = localStorage.getItem('m180-muted') === '1'; } catch (e) {}
+  function init() {
+    if (ctx) { ctx.resume && ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      ctx = new AC();
+      buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { ctx = null; }
+  }
+  function beep(f, dur = .08, type = 'square', vol = .04, at = 0) {
+    if (!ctx || muted) return;
+    const t = ctx.currentTime + at, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .006); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + dur + .02);
+  }
+  function hiss(dur = .2, vol = .05, at = 0) {
+    if (!ctx || muted) return;
+    const t = ctx.currentTime + at, s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = buf; f.type = 'bandpass'; f.frequency.value = 2300; f.Q.value = .8;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    s.connect(f).connect(g).connect(ctx.destination); s.start(t, Math.random() * .5); s.stop(t + dur + .02);
+  }
+  return {
+    init,
+    get muted() { return muted; },
+    toggle() { muted = !muted; try { localStorage.setItem('m180-muted', muted ? '1' : '0'); } catch (e) {} return muted; },
+    incoming() { hiss(.4, .06); beep(1046, .07, 'sine', .06, .42); beep(1318, .11, 'sine', .06, .52); },
+    ok() { beep(1200, .05, 'square', .03); beep(1600, .08, 'square', .03, .06); },
+    err() { hiss(.16, .07); beep(150, .22, 'sawtooth', .05); },
+    go() { beep(1760, .06, 'sine', .06); },
+    tap() { beep(950, .035, 'square', .025); },
+    squelch() { hiss(.25, .05); beep(720, .06, 'sine', .035, .22); },
+    alarm() { beep(880, .12, 'square', .04); beep(660, .12, 'square', .04, .14); beep(880, .12, 'square', .04, .28); beep(660, .12, 'square', .04, .42); },
+    tick() { beep(2400, .02, 'square', .015); }
+  };
+})();
+function renderMute() {
+  muteBtn.innerHTML = Sound.muted ? ICON.off : ICON.on;
+  muteBtn.setAttribute('aria-label', Sound.muted ? 'Zapnout zvuk' : 'Vypnout zvuk');
+}
+muteBtn.addEventListener('click', () => { Sound.init(); Sound.toggle(); renderMute(); });
+renderMute();
+
+/* ---------- šum na pozadí ---------- */
+const Noise = (() => {
+  const c = $('#noise'), W = 110, H = 190;
+  c.width = W; c.height = H;
+  const x = c.getContext('2d'), img = x.createImageData(W, H);
+  let hotUntil = 0;
+  function draw() {
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) { const v = Math.random() * 255 | 0; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+    x.putImageData(img, 0, 0);
+  }
+  draw();
+  if (!reduced) setInterval(() => { draw(); c.classList.toggle('hot', performance.now() < hotUntil); }, 90);
+  return {
+    hot(ms = 280) { if (reduced) return; hotUntil = performance.now() + ms; c.classList.add('hot'); },
+    level(v) { c.style.setProperty('--noise', v); }
+  };
+})();
+function glitch() {
+  Noise.hot();
+  if (reduced) return;
+  app.classList.remove('glitch'); void app.offsetWidth; app.classList.add('glitch');
+}
+
+/* ---------- mise ---------- */
+const PHASES = [
+  { id: 'reflex', no: '01', title: 'Aktivace spojení', budget: 25,
+    sit: 'Záložní vysílač se snaží připojit k nouzové síti.',
+    rule: 'Čekej, dokud je kruh červený. Jakmile zezelená, klepni. Pět kol.',
+    done: 'Záložní spojení aktivováno.' },
+  { id: 'memory', no: '02', title: 'Poslední souřadnice', budget: 25,
+    sit: 'Na tři sekundy se ukáže poslední známá poloha týmu.',
+    rule: 'Zapamatuj si pět označených polí. Až zmizí, vyznač je na mapě.',
+    done: 'Poloha týmu lokalizována.' },
+  { id: 'decode', no: '03', title: 'Dekódování zprávy', budget: 25,
+    sit: 'Dorazila poškozená zpráva. Čitelná je jen část kódu.',
+    rule: 'Doplň symbol, který v opakujícím se vzoru chybí. Tři zprávy.',
+    done: 'Zpráva dekódována.' },
+  { id: 'route', no: '04', title: 'Bezpečná trasa', budget: 30,
+    sit: 'Tým musí dojet k nouzovému komunikačnímu bodu. V nádrži má 14 bodů paliva.',
+    rule: 'Čísla na mapě jsou spotřeba paliva na úseku, překážky přidávají další. Vyber trasu s nejnižší spotřebou.',
+    done: 'Trasa odeslána týmu.' },
+  { id: 'signal', no: '05', title: 'Nestabilní signál', budget: 25,
+    sit: 'Přenos kolísá a mění se komunikační frekvence.',
+    rule: 'Sbírej jen modré kruhy. Když se frekvence změní, pravidlo se otočí.',
+    done: 'Signál stabilizován.' },
+  { id: 'team', no: '06', title: 'Podpora týmu', budget: 30,
+    sit: 'Spojení je obnoveno. Tým čeká na poslední instrukce.',
+    rule: 'Přetáhni vybavení k potřebě, kterou řeší. Pak rozhodni, jak tým povedeš dál.',
+    done: 'Tým je připraven pokračovat.' }
+];
+
+const ARCH = {
+  A: { name: 'Akční typ', text: 'Jednáš rychle a nenecháš se rozhodit. Když se situace změní, reaguješ dřív, než ostatní stihnou zaváhat.' },
+  N: { name: 'Analytik', text: 'Všímáš si detailů a hledáš vzorce. Než začneš jednat, chceš rozumět tomu, co se děje.' },
+  S: { name: 'Stratég', text: 'Přemýšlíš dopředu. Dokážeš hledat efektivní řešení a plánovat i v náročných situacích.' },
+  T: { name: 'Týmový hráč', text: 'Myslíš na lidi kolem sebe. Umíš rozdělit práci tak, aby každý věděl, co má dělat, a držíš vyrovnaný výkon.' }
+};
+
+const M = { remaining: 180, phaseLeft: 0, budget: 1, running: false, onTimeout: null, results: {}, log: [], last: 0, timers: [] };
+const later = (fn, ms) => { const id = setTimeout(fn, ms); M.timers.push(id); return id; };
+const clearLater = () => { M.timers.forEach(clearTimeout); M.timers = []; };
+
+function stamp() { return 'T+' + String(Math.round(180 - M.remaining)).padStart(3, '0'); }
+function log(text, ts = true) {
+  M.log.push((ts ? `<span class="ts">${stamp()}</span> ` : '') + text);
+  logEl.innerHTML = M.log.slice(-2).map(l => `<div>${l}</div>`).join('');
+}
+function setSteps(cur) {
+  stepsEl.forEach((li, i) => { li.className = i < cur ? 'done' : i === cur ? 'now' : ''; });
+  const lit = Math.round(Math.max(0, cur) * 5 / 6);
+  $$('i', sigEl).forEach((b, i) => b.classList.toggle('on', i < lit));
+  sigEl.classList.toggle('dead', lit === 0);
+}
+
+function frame(ts) {
+  const dt = M.last ? Math.min(.5, (ts - M.last) / 1000) : 0;
+  M.last = ts;
+  if (M.running) {
+    M.remaining = Math.max(0, M.remaining - dt);
+    const before = Math.ceil(M.phaseLeft);
+    M.phaseLeft -= dt;
+    if (M.phaseLeft > 0 && M.phaseLeft <= 5 && Math.ceil(M.phaseLeft) !== before) Sound.tick();
+    if (M.phaseLeft <= 0) {
+      M.phaseLeft = 0; M.running = false;
+      const f = M.onTimeout; M.onTimeout = null; f && f();
+    }
+  }
+  const sec = Math.ceil(M.remaining);
+  if (clockEl.textContent !== String(sec)) clockEl.textContent = sec;
+  clockBox.classList.toggle('warn', sec <= 60 && sec > 25);
+  clockBox.classList.toggle('crit', sec <= 25);
+  clockBox.classList.toggle('paused', !M.running);
+  pbar.style.transform = `scaleX(${clamp(M.phaseLeft / M.budget)})`;
+  pbarBox.classList.toggle('low', M.running && M.phaseLeft <= 5);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- obrazovky ---------- */
+let waveTimer = null;
+function intro() {
+  clearLater(); M.running = false; M.remaining = 180; M.results = {}; M.log = []; M.phaseLeft = 0;
+  setSteps(-1); Noise.level(.065);
+  logEl.innerHTML = '';
+  log('<span class="ts">21:47:03</span> Jednotka ORLOV: ztráta spojení', false);
+  stage.innerHTML = `
+    <section class="intro">
+      <div class="intro-top"><span class="rec">● NOUZOVÝ KANÁL 7</span><span>148,250 MHz</span></div>
+      <h1 class="lost">Spojení <em>přerušeno</em></h1>
+      <svg class="wave" viewBox="0 0 300 40" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="20" x2="300" y2="20"/><polyline id="wave" points="0,20 300,20"/></svg>
+      <div class="lastmsg">
+        <p class="eyebrow">Poslední zpráva z terénu · 21:47:03</p>
+        <p class="msg">„Centrálo, ztratili jsme spojení. Potřebujeme instrukce.“</p>
+      </div>
+      <p class="have">Máš <b>180 sekund</b>.<br>Dokážeš dokončit misi?</p>
+      <button class="btn primary big" id="start" type="button">Zahájit misi</button>
+      <p class="fine" style="text-align:center">6 krátkých úkolů · odpočet začne po stisku · se zvukem</p>
+    </section>`;
+  const wave = $('#wave');
+  clearInterval(waveTimer);
+  const drawWave = () => {
+    const pts = [];
+    const spike = Math.random() < .25 ? (Math.random() * 300 | 0) : -100;
+    for (let x = 0; x <= 300; x += 4) {
+      let y = 20 + (Math.random() - .5) * 2.4;
+      if (Math.abs(x - spike) < 14) y = 20 + (Math.random() - .5) * 30;
+      pts.push(x + ',' + y.toFixed(1));
+    }
+    wave.setAttribute('points', pts.join(' '));
+  };
+  drawWave();
+  if (!reduced) waveTimer = setInterval(drawWave, 110);
+  $('#start').addEventListener('click', () => {
+    clearInterval(waveTimer);
+    Sound.init(); Sound.incoming();
+    Noise.level(.045);
+    log('Centrála na příjmu. Mise zahájena.');
+    runPhase(0);
+  });
+}
+
+function runPhase(i) {
+  clearLater();
+  const p = PHASES[i];
+  setSteps(i);
+  M.budget = p.budget; M.phaseLeft = p.budget;
+  stage.innerHTML = `
+    <section class="brief">
+      <p class="eyebrow">Fáze ${p.no} / 06 · limit ${p.budget} s</p>
+      <p class="no" aria-hidden="true">${p.no}</p>
+      <h2>${p.title}</h2>
+      <p class="sit">${p.sit}</p>
+      <p class="rule">${p.rule}</p>
+      <button class="btn primary big" id="go" type="button">Rozumím</button>
+      <div class="auto" aria-hidden="true"><i></i></div>
+    </section>`;
+  let started = false;
+  const begin = () => {
+    if (started) return; started = true;
+    clearLater();
+    let ended = false, ctl = null;
+    const finish = res => {
+      if (ended) return; ended = true;
+      M.running = false; M.onTimeout = null;
+      ctl && ctl.cleanup && ctl.cleanup();
+      M.results[p.id] = res;
+      beat(p, res, () => i + 1 < PHASES.length ? runPhase(i + 1) : finale());
+    };
+    M.phaseLeft = p.budget; M.running = true;
+    ctl = GAMES[p.id](stage, finish);
+    M.onTimeout = () => ctl.timeout();
+  };
+  $('#go').addEventListener('click', () => { Sound.tap(); begin(); });
+  later(begin, 8000);
+}
+
+function beat(p, res, next) {
+  clearLater();
+  Sound.squelch();
+  log(p.done);
+  setSteps(PHASES.indexOf(p) + 1);
+  stage.innerHTML = `
+    <section class="done" id="beat" role="status">
+      <div class="tick">${ICON.check}</div>
+      <p class="eyebrow">Fáze ${p.no} · ${p.title}</p>
+      <h2>${p.done}</h2>
+      <p class="sum">${res.summary}</p>
+    </section>`;
+  let gone = false;
+  const go = () => { if (gone) return; gone = true; next(); };
+  later(go, 2000);
+}
+
+/* ---------- minihry ---------- */
+const GAMES = {};
+
+/* 01 Reakce */
+GAMES.reflex = (root, finish) => {
+  root.innerHTML = `
+    <div class="g">
+      <div class="g-head"><span>KOLO <b id="rnd">1</b> / 5</span><span id="rt">— ms</span></div>
+      <div class="orb-wrap"><button class="orb" id="orb" type="button" data-s="idle"><span id="orbt">PŘIPRAV SE</span></button></div>
+      <ol class="pips" id="pips"><li></li><li></li><li></li><li></li><li></li></ol>
+      <p class="g-hint"><span class="t-red">Červená</span> = čekej · <span style="color:var(--green)">zelená</span> = klepni</p>
+    </div>`;
+  const orb = $('#orb', root), orbt = $('#orbt', root), pips = $$('#pips li', root);
+  let state = 'idle', t0 = 0, timer = null, done = false;
+  const times = []; let falses = 0;
+  const set = (s, txt) => { state = s; orb.dataset.s = s; orbt.textContent = txt; };
+  const arm = () => {
+    set('wait', 'ČEKEJ');
+    timer = setTimeout(() => { set('go', 'KLEPNI'); t0 = performance.now(); Sound.go(); }, 900 + Math.random() * 1900);
+  };
+  const press = () => {
+    if (done) return;
+    if (state === 'go') {
+      const rt = performance.now() - t0;
+      times.push(rt);
+      pips[times.length - 1].className = 'ok';
+      $('#rt', root).textContent = Math.round(rt) + ' ms';
+      set('hit', 'PŘIJATO'); Sound.ok();
+      if (times.length >= 5) timer = setTimeout(end, 450);
+      else { $('#rnd', root).textContent = times.length + 1; timer = setTimeout(arm, 650); }
+    } else if (state === 'wait') {
+      clearTimeout(timer); falses++;
+      set('bad', 'CHYBNÝ SIGNÁL'); Sound.err(); glitch();
+      timer = setTimeout(arm, 1100);
+    }
+  };
+  orb.addEventListener('pointerdown', e => { e.preventDefault(); press(); });
+  orb.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!e.repeat) press(); } });
+  orb.focus({ preventScroll: true });
+  timer = setTimeout(arm, 500);
+  function end() {
+    if (done) return; done = true; clearTimeout(timer);
+    const filled = times.concat(Array(5 - times.length).fill(900));
+    const avg = filled.reduce((a, b) => a + b, 0) / 5;
+    const real = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
+    finish({
+      speed: clamp((750 - avg) / 500), acc: clamp(1 - falses / 5), avg: real, rounds: times.length, falses,
+      summary: real ? `Průměrná reakce ${real} ms · kola ${times.length} / 5 · chybné signály ${falses}` : 'Spojení se nepodařilo navázat'
+    });
+  }
+  return { timeout: end, cleanup() { clearTimeout(timer); done = true; } };
+};
+
+/* 02 Paměť */
+GAMES.memory = (root, finish) => {
+  const cols = 'ABCD';
+  const target = new Set(shuffle([...Array(16).keys()]).slice(0, 5));
+  root.innerHTML = `
+    <div class="g">
+      <div class="g-head"><span id="mh">POLOHA TÝMU</span><span id="mc">3</span></div>
+      <div class="g-mid">
+        <div class="mem">
+          <div class="ax-x">${[...cols].map(c => `<span>${c}</span>`).join('')}</div>
+          <div class="ax-y"><span>1</span><span>2</span><span>3</span><span>4</span></div>
+          <div class="mgrid locked" id="mg">${[...Array(16).keys()].map(i => `<button class="cell" type="button" data-i="${i}" aria-label="Pole ${cols[i % 4]}${(i / 4 | 0) + 1}"></button>`).join('')}</div>
+        </div>
+        <p class="g-hint" id="mhint">Zapamatuj si pět označených polí.</p>
+      </div>
+    </div>`;
+  const grid = $('#mg', root), cells = $$('.cell', grid);
+  let state = 'show', t0 = 0, done = false, timer = null, iv = null;
+  const sel = new Set();
+  cells.forEach((c, i) => { if (target.has(i)) c.classList.add('lit'); });
+  let left = 3;
+  iv = setInterval(() => { left--; $('#mc', root).textContent = Math.max(left, 0); }, 1000);
+  timer = setTimeout(() => {
+    clearInterval(iv);
+    cells.forEach(c => c.classList.remove('lit'));
+    grid.classList.remove('locked');
+    state = 'pick'; t0 = performance.now();
+    $('#mh', root).textContent = 'OZNAČ POLOHU';
+    $('#mc', root).textContent = '0 / 5';
+    $('#mhint', root).textContent = 'Klepni na pět polí, kde byl tým.';
+    Sound.go();
+  }, 3000);
+  grid.addEventListener('click', e => {
+    const c = e.target.closest('.cell');
+    if (!c || state !== 'pick') return;
+    const i = +c.dataset.i;
+    if (sel.has(i)) { sel.delete(i); c.classList.remove('sel'); }
+    else if (sel.size < 5) { sel.add(i); c.classList.add('sel'); Sound.tap(); }
+    $('#mc', root).textContent = `${sel.size} / 5`;
+    if (sel.size === 5) { state = 'wait'; timer = setTimeout(() => { reveal(); timer = setTimeout(end, 1300); }, 250); }
+  });
+  let hits = 0, pickTime = 0;
+  function reveal() {
+    if (state === 'eval') return;
+    const wasPicking = state === 'pick' || state === 'wait';
+    state = 'eval'; grid.classList.add('locked'); clearInterval(iv); clearTimeout(timer);
+    pickTime = wasPicking ? (performance.now() - t0) / 1000 : 22;
+    cells.forEach((c, i) => {
+      c.classList.remove('sel', 'lit');
+      if (target.has(i) && sel.has(i)) { c.classList.add('hit'); hits++; }
+      else if (sel.has(i)) c.classList.add('miss');
+      else if (target.has(i)) c.classList.add('lost');
+    });
+    hits >= 4 ? Sound.ok() : Sound.err();
+    $('#mh', root).textContent = 'VÝSLEDEK';
+    $('#mc', root).textContent = `${hits} / 5`;
+    $('#mhint', root).textContent = hits === 5 ? 'Všech pět souřadnic sedí.' : 'Čárkovaně jsou pole, která chyběla.';
+  }
+  function end() {
+    if (done) return; done = true;
+    finish({ acc: hits / 5, speed: clamp((15 - pickTime) / 11), hits,
+      summary: `Přesnost ${hits} / 5 · ${fmt1(pickTime)} s na označení` });
+  }
+  return {
+    timeout() { if (state !== 'eval') reveal(); end(); },
+    cleanup() { clearInterval(iv); clearTimeout(timer); done = true; }
+  };
+};
+
+/* 03 Logika */
+GAMES.decode = (root, finish) => {
+  const PUZ = [
+    { seq: ['tri', 'dot', 'sq', 'tri', 'dot'], ans: 'sq' },
+    { seq: ['dia', 'dia', 'tri', 'dia', 'dia'], ans: 'tri' },
+    { seq: ['tri', 'dot', 'tri', 'dot', 'dot', 'tri', 'dot', 'dot'], ans: 'dot' }
+  ];
+  const RX = ['RX/7F ▒▒ 3A 0C ▒ KÓD:', 'RX/1D ▒ 92 ▒▒▒ E4 KÓD:', 'RX/▒▒ B0 51 ▒ 08 KÓD:'];
+  let k = 0, correct = 0, done = false, timer = null, lock = false;
+  const t0 = performance.now();
+  root.innerHTML = `
+    <div class="g">
+      <div class="g-head"><span>ZPRÁVA <b id="dk">1</b> / 3</span><span id="dc">0 dekódováno</span></div>
+      <div class="g-mid">
+        <p class="rx" id="rx"></p>
+        <div class="seq" id="seq"></div>
+        <div class="opts" id="opts"></div>
+        <p class="g-hint">Který symbol patří na místo otazníku?</p>
+      </div>
+    </div>`;
+  const seqEl = $('#seq', root), optsEl = $('#opts', root);
+  function show() {
+    const p = PUZ[k]; lock = false;
+    $('#dk', root).textContent = k + 1;
+    $('#rx', root).textContent = RX[k];
+    seqEl.innerHTML = p.seq.map(s => `<span class="tile">${SHAPE[s]}</span>`).join('') + `<span class="tile q" id="qt">?</span>`;
+    optsEl.className = 'opts';
+    optsEl.innerHTML = shuffle(['tri', 'dot', 'sq', 'dia']).map(s => `<button class="opt" type="button" data-s="${s}" aria-label="${SHAPE_NAME[s]}">${SHAPE[s]}</button>`).join('');
+  }
+  optsEl.addEventListener('click', e => {
+    const b = e.target.closest('.opt');
+    if (!b || lock || done) return;
+    lock = true; optsEl.classList.add('locked');
+    const p = PUZ[k], q = $('#qt', root);
+    q.innerHTML = SHAPE[p.ans];
+    if (b.dataset.s === p.ans) { correct++; b.classList.add('ok'); q.classList.add('ok'); Sound.ok(); }
+    else { b.classList.add('bad'); q.classList.add('fix'); Sound.err(); glitch(); }
+    $('#dc', root).textContent = `${correct} dekódováno`;
+    timer = setTimeout(() => { k++; k < PUZ.length ? show() : end(); }, 800);
+  });
+  show();
+  function end() {
+    if (done) return; done = true; clearTimeout(timer);
+    const t = (performance.now() - t0) / 1000;
+    finish({ acc: correct / 3, speed: k >= 3 ? clamp((20 - t) / 14) : 0, correct,
+      summary: `Dekódováno ${correct} / 3 · ${fmt1(t)} s` });
+  }
+  return { timeout: end, cleanup() { clearTimeout(timer); done = true; } };
+};
+
+/* 04 Plánování trasy */
+GAMES.route = (root, finish) => {
+  const TANK = 14;
+  const N = { S: [40, 262], T: [318, 46], A1: [176, 150], B1: [46, 118], B2: [160, 46], C1: [150, 272], C2: [256, 236], C3: [316, 146] };
+  const R = [
+    { id: 'A', nodes: ['S', 'A1', 'T'], costs: [4, 3], obs: { seg: 1, add: 8, label: 'Zřícený most' } },
+    { id: 'B', nodes: ['S', 'B1', 'B2', 'T'], costs: [4, 3, 4], obs: { seg: 1, add: 2, label: 'Sesuv' } },
+    { id: 'C', nodes: ['S', 'C1', 'C2', 'C3', 'T'], costs: [3, 2, 2, 2], obs: { seg: 2, add: 2, label: 'Kontrolní stanoviště' } }
+  ];
+  R.forEach(r => { r.total = r.costs.reduce((a, b) => a + b, 0) + r.obs.add; r.pts = r.nodes.map(n => N[n]); });
+  const best = Math.min(...R.map(r => r.total));
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+  let svg = `<svg class="map" id="map" viewBox="0 0 360 300" role="group" aria-label="Mapa tras">
+    <ellipse class="contour" cx="105" cy="196" rx="58" ry="30"/><ellipse class="contour" cx="105" cy="196" rx="32" ry="15"/>
+    <ellipse class="contour" cx="250" cy="160" rx="46" ry="28"/><ellipse class="contour" cx="250" cy="160" rx="22" ry="12"/>
+    <ellipse class="contour" cx="70" cy="40" rx="40" ry="20"/>`;
+  R.forEach(r => {
+    const pts = r.pts.map(p => p.join(',')).join(' ');
+    svg += `<g class="route" data-r="${r.id}"><polyline class="r-line" points="${pts}"/><polyline class="r-hit" points="${pts}"/></g>`;
+  });
+  R.forEach(r => r.nodes.slice(2, -1).forEach(n => { const [x, y] = N[n]; svg += `<rect class="wp" x="${x - 5}" y="${y - 5}" width="10" height="10"/>`; }));
+  R.forEach(r => {
+    r.costs.forEach((c, i) => {
+      const a = r.pts[i], b = r.pts[i + 1], isObs = r.obs.seg === i;
+      const [x, y] = lerp(a, b, isObs ? .3 : .45);
+      svg += `<g class="badge" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})"><rect x="-11" y="-10" width="22" height="20"/><text>${c}</text></g>`;
+      if (isObs) {
+        const [ox, oy] = lerp(a, b, .7);
+        svg += `<g class="obs" transform="translate(${ox.toFixed(1)} ${oy.toFixed(1)})"><title>${r.obs.label}</title><polygon points="0,-11 11,8 -11,8"/><text class="ex" y="6">!</text><text class="add" x="14" y="5">+${r.obs.add}</text></g>`;
+      }
+    });
+  });
+  R.forEach(r => { const [x, y] = r.pts[1]; svg += `<g class="tag" data-r="${r.id}"><circle cx="${x}" cy="${y}" r="12"/><text x="${x}" y="${y}">${r.id}</text></g>`; });
+  svg += `<rect class="base" x="${N.S[0] - 9}" y="${N.S[1] - 9}" width="18" height="18"/>
+    <circle class="goal" cx="${N.T[0]}" cy="${N.T[1]}" r="11"/><circle class="goal" cx="${N.T[0]}" cy="${N.T[1]}" r="4"/>
+    <text class="lbl" x="20" y="293">ZÁKLADNA</text>
+    <text class="lbl" x="350" y="20" text-anchor="end">NOUZOVÝ BOD</text>
+    <circle class="unit" id="unit" r="7" cx="${N.S[0]}" cy="${N.S[1]}" opacity="0"/>
+  </svg>`;
+
+  root.innerHTML = `
+    <div class="g">
+      <div class="g-head"><span>PLÁN PŘESUNU</span><span id="rsel">trasa nevybrána</span></div>
+      <div class="legend"><span class="tank">Nádrž: ${TANK} bodů paliva</span><span>číslo = palivo na úseku · <b>!</b> = překážka</span></div>
+      ${svg}
+      <div class="rt-row" role="group" aria-label="Výběr trasy">${R.map(r => `<button class="chip" type="button" data-r="${r.id}" aria-pressed="false">Trasa ${r.id}</button>`).join('')}</div>
+      <button class="btn primary" id="send" type="button" disabled>Odeslat trasu</button>
+    </div>`;
+  const map = $('#map', root), sendBtn = $('#send', root), unit = $('#unit', root);
+  let sel = null, done = false, sent = false, raf = 0, timer = null;
+  const t0 = performance.now();
+  const pick = id => {
+    if (sent) return;
+    sel = id; Sound.tap();
+    map.classList.add('picking');
+    $$('.route,.tag', map).forEach(g => g.classList.toggle('on', g.dataset.r === id));
+    $$('.chip', root).forEach(c => c.setAttribute('aria-pressed', c.dataset.r === id));
+    $('#rsel', root).textContent = `vybrána trasa ${id}`;
+    sendBtn.disabled = false;
+  };
+  map.addEventListener('click', e => { const g = e.target.closest('[data-r]'); if (g) pick(g.dataset.r); });
+  $$('.chip', root).forEach(c => c.addEventListener('click', () => pick(c.dataset.r)));
+  sendBtn.addEventListener('click', () => send());
+
+  function send() {
+    if (sent) return; sent = true; sendBtn.disabled = true;
+    const decideT = (performance.now() - t0) / 1000;
+    if (!sel) { end(decideT, null); return; }
+    const r = R.find(x => x.id === sel);
+    const ok = r.total <= TANK;
+    if (!ok) { $$('.route', map).find(g => g.dataset.r === sel).classList.add('bad'); unit.classList.add('bad'); }
+    ok ? Sound.ok() : Sound.err();
+    // přesun jednotky po trase; při nedostatku paliva se zastaví
+    const segs = []; let L = 0;
+    for (let i = 0; i < r.pts.length - 1; i++) { const a = r.pts[i], b = r.pts[i + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]); segs.push({ a, b, l, s: L }); L += l; }
+    const stopAt = ok ? 1 : TANK / r.total;
+    unit.setAttribute('opacity', '1');
+    const dur = reduced ? 1 : 1300, ts0 = performance.now();
+    const step = now => {
+      const f = Math.min(1, (now - ts0) / dur) * stopAt, d = f * L;
+      const sg = segs.find(s => d <= s.s + s.l) || segs[segs.length - 1];
+      const [x, y] = lerp(sg.a, sg.b, clamp((d - sg.s) / sg.l));
+      unit.setAttribute('cx', x.toFixed(1)); unit.setAttribute('cy', y.toFixed(1));
+      if (now - ts0 < dur) raf = requestAnimationFrame(step);
+      else timer = setTimeout(() => end(decideT, r), 500);
+    };
+    raf = requestAnimationFrame(step);
+  }
+  function end(decideT, r) {
+    if (done) return; done = true;
+    let eff = 0, summary = 'Trasa nebyla odeslána';
+    if (r) {
+      const sorted = R.map(x => x.total).sort((a, b) => a - b);
+      eff = r.total === best ? 1 : r.total <= TANK ? .5 : 0;
+      summary = r.total === best ? `Trasa ${r.id} · spotřeba ${r.total} z ${TANK} · nejúspornější volba`
+        : r.total <= TANK ? `Trasa ${r.id} · spotřeba ${r.total} z ${TANK} · dojede, nejúspornější byla ${sorted[0]}`
+        : `Trasa ${r.id} · spotřeba ${r.total} z ${TANK} · tým by nedojel`;
+    }
+    finish({ eff, speed: r ? clamp((28 - decideT) / 20) : 0, route: r ? r.id : null, total: r ? r.total : null, summary });
+  }
+  return {
+    timeout() { if (!sent) send(); if (!done) { cancelAnimationFrame(raf); clearTimeout(timer); const r = sel ? R.find(x => x.id === sel) : null; end(28, r); } },
+    cleanup() { cancelAnimationFrame(raf); clearTimeout(timer); done = true; }
+  };
+};
+
+/* 05 Adaptabilita */
+GAMES.signal = (root, finish) => {
+  root.innerHTML = `
+    <div class="g">
+      <div class="g-head"><span>FREKVENCE: <b id="fq" class="fq-blue">MODRÁ</b></span><span>ZACHYCENO <b id="sc">0</b></span></div>
+      <div class="sig-area" id="area"><div class="sig-banner" id="ban" hidden>ZMĚNA FREKVENCE.<br>SBÍREJ ČERVENÉ!</div></div>
+      <p class="g-hint" id="sh">Klepej na <b class="t-blue">modré kruhy</b>. Červené kosočtverce nech být.</p>
+    </div>`;
+  const area = $('#area', root), ban = $('#ban', root);
+  const P1 = 10000, BAN = 1700, P2 = 10500, EVERY = 520, LIFE = 1350;
+  const st = { 1: { targets: 0, hits: 0, wrong: 0 }, 2: { targets: 0, hits: 0, wrong: 0 } };
+  let mode = 'blue', ph = 1, iv = null, done = false, persev = 0, switchAt = 0;
+  const tm = [];
+  const score = () => { $('#sc', root).textContent = st[1].hits + st[2].hits; };
+  function spawn() {
+    if (done) return;
+    const color = Math.random() < .5 ? 'red' : 'blue';
+    const live = $$('.tok', area).map(t => [+t.style.getPropertyValue('--x'), +t.style.getPropertyValue('--y')]);
+    let x, y, n = 0;
+    do { x = Math.random(); y = Math.random(); n++; } while (n < 12 && live.some(([a, b]) => Math.abs(a - x) < .28 && Math.abs(b - y) < .26));
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'tok tok-' + color;
+    el.setAttribute('aria-label', color === 'blue' ? 'modrý kruh' : 'červený kosočtverec');
+    el.style.setProperty('--x', x.toFixed(3)); el.style.setProperty('--y', y.toFixed(3));
+    if (color === mode) st[ph].targets++;
+    const myPh = ph;
+    el.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (el.dataset.gone || done) return;
+      el.dataset.gone = '1';
+      if (color === mode) { st[myPh].hits++; Sound.tap(); el.classList.add('got'); }
+      else { st[myPh].wrong++; if (myPh === 2 && performance.now() - switchAt < 3000) persev++; Sound.err(); el.classList.add('bad'); glitch(); }
+      score();
+      setTimeout(() => el.remove(), 260);
+    });
+    area.append(el);
+    tm.push(setTimeout(() => { if (!el.dataset.gone) { el.dataset.gone = '1'; el.classList.add('fade'); setTimeout(() => el.remove(), 220); } }, LIFE));
+  }
+  tm.push(setTimeout(() => { spawn(); iv = setInterval(spawn, EVERY); }, 400));
+  tm.push(setTimeout(() => {
+    clearInterval(iv);
+    $$('.tok', area).forEach(t => t.remove());
+    mode = 'red'; ph = 2;
+    ban.hidden = false; Sound.alarm(); glitch();
+    const fq = $('#fq', root); fq.textContent = 'ČERVENÁ'; fq.className = 'fq-red';
+    $('#sh', root).innerHTML = 'Teď klepej jen na <b class="t-red">červené kosočtverce</b>.';
+    tm.push(setTimeout(() => { ban.hidden = true; switchAt = performance.now(); spawn(); iv = setInterval(spawn, EVERY); }, BAN));
+  }, 400 + P1));
+  tm.push(setTimeout(end, 400 + P1 + BAN + P2));
+  function end() {
+    if (done) return; done = true;
+    clearInterval(iv); tm.forEach(clearTimeout);
+    const T = st[1].targets + st[2].targets, H = st[1].hits + st[2].hits, W = st[1].wrong + st[2].wrong;
+    const acc = T + W ? H / (T + W) : 0;
+    const d2 = st[2].targets + st[2].wrong;
+    const adapt = d2 ? st[2].hits / d2 : 0;
+    finish({ acc, adapt, hits: H, targets: T, wrong: W, persev,
+      summary: `Zachyceno ${H} z ${T} · chybné klepnutí ${W} · po změně ${Math.round(adapt * 100)} %` });
+  }
+  return { timeout: end, cleanup() { done = true; clearInterval(iv); tm.forEach(clearTimeout); } };
+};
+
+/* 06 Koordinace */
+GAMES.team = (root, finish) => {
+  const NEEDS = [
+    { id: 'med', label: 'Zraněný člen týmu' },
+    { id: 'com', label: 'Poškozené komunikační zařízení' },
+    { id: 'veh', label: 'Vozidlo bez paliva' }
+  ];
+  const ITEMS = shuffle([
+    { id: 'med', label: 'Lékárnička' },
+    { id: 'com', label: 'Náhradní baterie' },
+    { id: 'veh', label: 'Palivo' }
+  ]);
+  const CHOICES = [
+    { k: 'T', s: 'rozdělit úkoly', t: 'Rozdělím úkoly tak, aby každý dělal to, co mu jde nejlíp.' },
+    { k: 'S', s: 'nejdřív vozidlo', t: 'Nejdřív vozidlo. Bez něj se nikam nepohneme.' },
+    { k: 'A', s: 'vyrazit hned', t: 'Vyrazíme hned, opravy zvládneme za jízdy.' },
+    { k: 'N', s: 'nejdřív hlášení o stavu', t: 'Nejdřív si od každého vyžádám hlášení o stavu.' }
+  ];
+  root.innerHTML = `
+    <div class="g" id="tg">
+      <div class="g-head"><span>VYBAVENÍ PRO TÝM</span><span id="tc">0 / 3</span></div>
+      <div class="needs">${NEEDS.map(n => `
+        <div class="need" data-need="${n.id}" role="button" tabindex="0" aria-label="${n.label}">
+          <span class="ic">${ICON[n.id]}</span><span class="nl">${n.label}</span><span class="slot"></span>
+        </div>`).join('')}</div>
+      <div class="tray" id="tray">${ITEMS.map(it => `<button class="item" type="button" data-item="${it.id}">${it.label}</button>`).join('')}</div>
+      <button class="btn primary" id="send" type="button" disabled>Odeslat vybavení</button>
+      <p class="g-hint">Přetáhni vybavení k potřebě. Jde to i klepnutím: nejdřív vybavení, pak potřeba.</p>
+    </div>`;
+  const tray = $('#tray', root), zones = $$('.need', root), sendBtn = $('#send', root);
+  const assign = {};               // need -> item
+  let picked = null, done = false, stage2 = false, correct = 0, timer = null, locked = false;
+  const chip = id => $(`.item[data-item="${id}"]`, root);
+  const needOf = item => Object.keys(assign).find(n => assign[n] === item);
+  function refresh() {
+    const n = Object.keys(assign).length;
+    $('#tc', root).textContent = `${n} / 3`;
+    sendBtn.disabled = n < 3 || locked;
+  }
+  function place(item, need) {
+    if (locked) return;
+    const prev = needOf(item); if (prev) delete assign[prev];
+    if (assign[need] && assign[need] !== item) tray.append(chip(assign[need]));
+    assign[need] = item;
+    $(`.need[data-need="${need}"] .slot`, root).append(chip(item));
+    Sound.tap(); unpick(); refresh();
+  }
+  function toTray(item) {
+    if (locked) return;
+    const prev = needOf(item); if (prev) delete assign[prev];
+    tray.append(chip(item)); unpick(); refresh();
+  }
+  function unpick() { picked = null; $$('.item', root).forEach(c => c.classList.remove('picked')); }
+  const zoneAt = (x, y) => zones.find(z => { const r = z.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; });
+  const inTray = (x, y) => { const r = tray.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; };
+
+  $$('.item', root).forEach(el => {
+    const id = el.dataset.item;
+    el.addEventListener('pointerdown', e => {
+      if (locked || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      e.preventDefault();
+      const sx = e.clientX, sy = e.clientY, r = el.getBoundingClientRect();
+      const ox = sx - r.left, oy = sy - r.top;
+      let ghost = null;
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      const move = ev => {
+        if (!ghost && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) {
+          ghost = el.cloneNode(true); ghost.classList.add('ghost'); ghost.classList.remove('picked');
+          ghost.style.width = r.width + 'px';
+          document.body.append(ghost); el.classList.add('lifting');
+        }
+        if (ghost) {
+          ghost.style.transform = `translate(${ev.clientX - ox}px, ${ev.clientY - oy}px)`;
+          const z = zoneAt(ev.clientX, ev.clientY);
+          zones.forEach(q => q.classList.toggle('over', q === z));
+        }
+      };
+      const up = ev => {
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        zones.forEach(q => q.classList.remove('over'));
+        if (ghost) {
+          ghost.remove(); el.classList.remove('lifting');
+          if (ev.type === 'pointercancel') return;
+          const z = zoneAt(ev.clientX, ev.clientY);
+          if (z) place(id, z.dataset.need);
+          else if (inTray(ev.clientX, ev.clientY)) toTray(id);
+        } else if (ev.type === 'pointerup') {
+          if (picked === id) unpick();
+          else { unpick(); picked = id; el.classList.add('picked'); Sound.tap(); }
+        }
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (e.detail === 0 && !locked) { // klávesnice
+        if (picked === id) unpick(); else { unpick(); picked = id; el.classList.add('picked'); }
+      }
+    });
+  });
+  zones.forEach(z => {
+    const act = () => { if (picked) place(picked, z.dataset.need); };
+    z.addEventListener('click', act);
+    z.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(); } });
+  });
+  tray.addEventListener('click', e => { if (e.target === tray && picked) toTray(picked); });
+
+  function evaluate() {
+    locked = true; sendBtn.disabled = true; unpick();
+    correct = NEEDS.filter(n => assign[n.id] === n.id).length;
+    zones.forEach(z => { const n = z.dataset.need; if (assign[n]) z.classList.add(assign[n] === n ? 'ok' : 'bad'); });
+    correct === 3 ? Sound.ok() : Sound.err();
+  }
+  sendBtn.addEventListener('click', () => {
+    if (locked) return;
+    evaluate();
+    timer = setTimeout(decide, 900);
+  });
+  function decide() {
+    if (done) return;
+    stage2 = true;
+    root.innerHTML = `
+      <div class="g">
+        <div class="g-head"><span>POSLEDNÍ ROZKAZ</span><span>vybavení ${correct} / 3</span></div>
+        <div class="g-mid">
+          <h3 class="q">Tým je vybavený. Jak ho povedeš dál?</h3>
+          <div class="choices">${CHOICES.map(c => `<button class="choice" type="button" data-k="${c.k}">${c.t}</button>`).join('')}</div>
+        </div>
+      </div>`;
+    $$('.choice', root).forEach(b => b.addEventListener('click', () => {
+      if (done) return;
+      b.classList.add('on'); Sound.ok();
+      timer = setTimeout(() => end(b.dataset.k), 350);
+    }));
+  }
+  function end(choice) {
+    if (done) return; done = true; clearTimeout(timer);
+    const c = CHOICES.find(x => x.k === choice);
+    finish({ acc: correct / 3, correct, choice: choice || null,
+      summary: `Vybavení ${correct} / 3 · ${c ? 'rozkaz: ' + c.s : 'rozkaz nebyl vydán'}` });
+  }
+  return {
+    timeout() { if (!stage2 && !locked) evaluate(); end(null); },
+    cleanup() { clearTimeout(timer); done = true; }
+  };
+};
+
+/* ---------- vyhodnocení ---------- */
+function phaseScores() {
+  const r = M.results;
+  return [
+    (r.reflex.speed + r.reflex.acc) / 2,
+    r.memory.acc,
+    r.decode.acc * .8 + r.decode.speed * .2,
+    r.route.eff,
+    r.signal.acc,
+    r.team.acc
+  ].map(v => clamp(v));
+}
+/* Každá minihra rozdává body více archetypům (rychlost, přesnost, způsob řešení).
+   Výsledek je podíl získaných bodů na maximu daného archetypu. */
+function profile() {
+  const r = M.results, pts = { A: 0, N: 0, S: 0, T: 0 }, max = { A: 0, N: 0, S: 0, T: 0 };
+  const add = (k, v, w) => { pts[k] += clamp(v) * w; max[k] += w; };
+  add('A', r.reflex.speed, 3); add('A', r.reflex.acc, 1); add('N', r.reflex.acc, 1); add('T', r.reflex.acc, 1);
+  add('N', r.memory.acc, 3); add('S', r.memory.acc, 1);
+  add('N', r.decode.acc, 2); add('N', r.decode.speed, 1); add('S', r.decode.acc, 1);
+  add('S', r.route.eff, 3); add('S', r.route.speed, 1); add('A', r.route.speed, 1);
+  add('A', r.signal.acc, 2); add('A', r.signal.adapt, 1); add('S', r.signal.adapt, 1);
+  add('T', r.team.acc, 2);
+  const g = phaseScores(), mean = g.reduce((a, b) => a + b, 0) / g.length;
+  const sd = Math.sqrt(g.reduce((a, b) => a + (b - mean) ** 2, 0) / g.length);
+  add('T', clamp(1 - sd * 2.5) * Math.min(1, mean * 1.4), 2);   // vyrovnaný výkon napříč misí
+  ['A', 'N', 'S', 'T'].forEach(k => add(k, r.team.choice === k ? 1 : 0, 2));
+  const pct = {};
+  for (const k in pts) pct[k] = pts[k] / max[k];
+  const top = ['S', 'N', 'A', 'T'].reduce((b, k) => pct[k] > pct[b] + 1e-9 ? k : b, 'S');
+  return { pct, top };
+}
+
+function finale() {
+  clearLater();
+  M.running = false; M.phaseLeft = 0;
+  setSteps(6);
+  Sound.incoming();
+  log('Tým na příjmu. Mise dokončena.');
+  const g = phaseScores();
+  stage.innerHTML = `
+    <section class="scan-fin" role="status">
+      <div class="tick" style="width:54px;height:54px;color:var(--green)">${ICON.check}</div>
+      <h2>Mise<br>dokončena</h2>
+      <p class="eyebrow">Vyhodnocuji záznam mise…</p>
+      <div class="srows">${PHASES.map((p, i) => `<span>${p.no} ${p.title.toUpperCase()}</span><div class="bar"><i style="transform:scaleX(${g[i].toFixed(2)});animation-delay:${(i * .28).toFixed(2)}s"></i></div>`).join('')}</div>
+    </section>`;
+  later(result, reduced ? 700 : 2600);
+}
+
+function result() {
+  const { pct, top } = profile(), a = ARCH[top];
+  const rows = ['S', 'N', 'A', 'T'].sort((x, y) => pct[y] - pct[x]);
+  Sound.ok();
+  log(`Profil: ${a.name.toUpperCase()}`);
+  stage.innerHTML = `
+    <section class="result">
+      <p class="eyebrow">Tvůj archetyp</p>
+      <div class="arch"><div class="arch-ic">${ICON[top]}</div><h2>${a.name}</h2></div>
+      <p class="arch-q">„${a.text}“</p>
+      <div class="profile" aria-label="Profil napříč archetypy">${rows.map(k => `
+        <div class="${k === top ? 'top' : ''}"><span>${ARCH[k].name}</span><div class="bar"><i style="transform:scaleX(${pct[k].toFixed(2)})"></i></div><span class="pct">${Math.round(pct[k] * 100)} %</span></div>`).join('')}
+      </div>
+      <dl class="stats">
+        ${PHASES.map(p => `<dt>${p.no}</dt><dd>${M.results[p.id].summary}</dd>`).join('')}
+        <dt>ČAS</dt><dd>Rezerva ${Math.ceil(M.remaining)} s ze 180</dd>
+      </dl>
+      <div class="cta">
+        <p class="cta-lead">Možná hledáme právě tebe.</p>
+        <a class="btn primary big" href="${CONFIG.ctaUrl}" target="_blank" rel="noopener">${CONFIG.ctaLabel} →</a>
+        <button class="btn ghost" id="again" type="button">Hrát znovu</button>
+      </div>
+      <p class="fine">Výsledek je orientační herní profil, nikoliv skutečný osobnostní test.</p>
+    </section>`;
+  stage.scrollTop = 0;
+  $('#again', stage).addEventListener('click', intro);
+}
+
+intro();
+})();
+</script>
+</body>
+</html>
